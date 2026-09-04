@@ -126,10 +126,9 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHARED_LIBS=OFF \
             -DBUILD_TESTING=OFF \
-            -DBUILD_APPS=OFF \
             -DDISABLE_WERROR=ON \
             -DCMAKE_C_FLAGS='-O2 -pipe'
-          cmake --build "$SRC/json-c/build-arm" -- -j"$JOBS"
+          cmake --build "$SRC/json-c/build-arm" --target json-c -- -j"$JOBS"
           cmake --install "$SRC/json-c/build-arm"
 
           echo '== Build libevent 2.1.12 with OpenSSL =='
