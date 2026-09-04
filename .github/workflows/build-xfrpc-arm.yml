@@ -142,6 +142,7 @@ jobs:
             -DEVENT__DISABLE_SAMPLES=ON \
             -DEVENT__DISABLE_BENCHMARK=ON \
             -DEVENT__DISABLE_OPENSSL=OFF \
+            -DEVENT__HAVE_GETRANDOM=OFF \
             -DOPENSSL_ROOT_DIR="$DEPS" \
             -DOPENSSL_USE_STATIC_LIBS=TRUE \
             -DCMAKE_C_FLAGS="-O2 -pipe -I$DEPS/include" \
