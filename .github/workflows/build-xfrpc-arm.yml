@@ -111,7 +111,7 @@ jobs:
           echo '== Build OpenSSL 1.1.1w =='
           pushd "$SRC/openssl"
           ./Configure linux-generic32 \
-            no-shared no-tests no-asm no-dso no-engine \
+            no-shared no-tests no-asm no-dso no-engine no-async \
             --prefix="$DEPS" \
             --openssldir=/etc/ssl \
             --cross-compile-prefix="$CROSS"
@@ -155,8 +155,6 @@ jobs:
 
           echo '== Prepare xfrpc for GCC 5.2/static dependency link =='
           cd "$SRC/xfrpc"
-          # Build-only compatibility adjustments: do not turn compiler warnings into errors
-          # on this old GCC, and put event_openssl before event for static archive resolution.
           sed -i '/^[[:space:]]*-Werror[[:space:]]*$/d' CMakeLists.txt
           sed -i '/target_compile_options(xfrpc PRIVATE -Wno-stringop-truncation)/d' CMakeLists.txt
           python3 - <<'PY'
