@@ -1,0 +1,51 @@
+name: Build GCC 5.2 artifact
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify split files
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ls -lh gcc-5.2.tar.gz.part_0*
+          test -f gcc-5.2.tar.gz.part_00
+          test -f gcc-5.2.tar.gz.part_01
+          test -f gcc-5.2.tar.gz.part_02
+          test -f gcc-5.2.tar.gz.part_03
+          test -f gcc-5.2.tar.gz.part_04
+          sha256sum gcc-5.2.tar.gz.part_0*
+
+      - name: Merge and validate archive
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat gcc-5.2.tar.gz.part_00 \
+              gcc-5.2.tar.gz.part_01 \
+              gcc-5.2.tar.gz.part_02 \
+              gcc-5.2.tar.gz.part_03 \
+              gcc-5.2.tar.gz.part_04 > gcc-5.2.tar.gz
+          ls -lh gcc-5.2.tar.gz
+          sha256sum gcc-5.2.tar.gz | tee gcc-5.2.tar.gz.sha256
+          gzip -t gcc-5.2.tar.gz
+          tar -tzf gcc-5.2.tar.gz | head -n 50 || true
+
+      - name: Upload merged GCC archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: gcc-5.2-source
+          path: |
+            gcc-5.2.tar.gz
+            gcc-5.2.tar.gz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
