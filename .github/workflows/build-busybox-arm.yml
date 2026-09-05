@@ -27,21 +27,14 @@ jobs:
           exec > >(tee "$GITHUB_WORKSPACE/busybox-build.log") 2>&1
 
           sudo apt-get update
-          sudo apt-get install -y \
-            libc6-i386 lib32stdc++6 lib32gcc-s1 \
-            build-essential bzip2 curl file binutils bc perl
+          sudo apt-get install -y libc6-i386 lib32stdc++6 lib32gcc-s1 build-essential bzip2 curl file binutils bc perl
 
           WORK="$GITHUB_WORKSPACE/work-busybox"
           OUT="$GITHUB_WORKSPACE/busybox-output"
           mkdir -p "$WORK/toolchain" "$OUT"
 
           echo '== Reconstruct GCC 5.2 toolchain =='
-          ls -lh gcc-5.2.tar.gz.part_0*
-          cat gcc-5.2.tar.gz.part_00 \
-              gcc-5.2.tar.gz.part_01 \
-              gcc-5.2.tar.gz.part_02 \
-              gcc-5.2.tar.gz.part_03 \
-              gcc-5.2.tar.gz.part_04 > "$WORK/gcc-5.2.tar.gz"
+          cat gcc-5.2.tar.gz.part_00 gcc-5.2.tar.gz.part_01 gcc-5.2.tar.gz.part_02 gcc-5.2.tar.gz.part_03 gcc-5.2.tar.gz.part_04 > "$WORK/gcc-5.2.tar.gz"
           gzip -t "$WORK/gcc-5.2.tar.gz"
           tar -xzf "$WORK/gcc-5.2.tar.gz" -C "$WORK/toolchain"
 
@@ -49,6 +42,7 @@ jobs:
           TARGET="arm-openwrt-linux-uclibcgnueabi"
           CROSS="$TC/bin/${TARGET}-"
           export PATH="$TC/bin:$PATH"
+          export STAGING_DIR="$TC"
 
           echo '== Toolchain identity =='
           file "${CROSS}gcc"
@@ -57,17 +51,13 @@ jobs:
 
           echo '== Fetch official BusyBox 1.38.0 source =='
           cd "$WORK"
-          curl -fL --retry 4 --retry-delay 2 \
-            -o busybox-1.38.0.tar.bz2 \
-            https://busybox.net/downloads/busybox-1.38.0.tar.bz2
+          curl -fL --retry 4 --retry-delay 2 -o busybox-1.38.0.tar.bz2 https://busybox.net/downloads/busybox-1.38.0.tar.bz2
           echo '34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2  busybox-1.38.0.tar.bz2' | sha256sum -c -
           tar -xjf busybox-1.38.0.tar.bz2
           cd busybox-1.38.0
 
           echo '== Configure BusyBox =='
           make ARCH=arm CROSS_COMPILE="$CROSS" defconfig
-
-          # Build a self-contained static binary for easier deployment on embedded targets.
           if grep -q '^# CONFIG_STATIC is not set' .config; then
             sed -i 's/^# CONFIG_STATIC is not set$/CONFIG_STATIC=y/' .config
           elif grep -q '^CONFIG_STATIC=' .config; then
@@ -76,8 +66,12 @@ jobs:
             echo 'CONFIG_STATIC=y' >> .config
           fi
 
-          # Keep the build non-interactive if 1.38.0 introduces new config symbols.
+          # BusyBox oldconfig exits normally after consuming the needed answers.
+          # Disable pipefail only around the yes|make pipeline so SIGPIPE from yes
+          # is not treated as a build failure; make remains the pipeline status.
+          set +o pipefail
           yes '' | make ARCH=arm CROSS_COMPILE="$CROSS" oldconfig
+          set -o pipefail
 
           cp .config "$OUT/busybox-1.38.0.config"
 
@@ -94,14 +88,10 @@ jobs:
           "${CROSS}readelf" -d "$OUT/busybox-1.38.0-armv7-uclibc-static" || true
           "${CROSS}readelf" -l "$OUT/busybox-1.38.0-armv7-uclibc-static" | grep -E 'interpreter|INTERP' || true
 
-          sha256sum \
-            "$OUT/busybox-1.38.0-armv7-uclibc-static" \
-            "$OUT/busybox-1.38.0-armv7-uclibc-static.unstripped" \
-            | tee "$OUT/SHA256SUMS"
+          sha256sum "$OUT/busybox-1.38.0-armv7-uclibc-static" "$OUT/busybox-1.38.0-armv7-uclibc-static.unstripped" | tee "$OUT/SHA256SUMS"
 
           {
             echo 'BusyBox version: 1.38.0'
-            echo 'Source: https://busybox.net/downloads/busybox-1.38.0.tar.bz2'
             echo 'Source SHA256: 34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2'
             echo "Toolchain: ${TARGET}-gcc 5.2.0 / uClibc-ng 1.0.14"
             echo 'Configuration: defconfig + CONFIG_STATIC=y'
