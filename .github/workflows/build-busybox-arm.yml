@@ -1,0 +1,139 @@
+name: Build BusyBox ARM GCC 5.2
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-busybox-arm.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout helper repository
+        uses: actions/checkout@v4
+
+      - name: Build BusyBox 1.38.0 static
+        id: crossbuild
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec > >(tee "$GITHUB_WORKSPACE/busybox-build.log") 2>&1
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            libc6-i386 lib32stdc++6 lib32gcc-s1 \
+            build-essential bzip2 curl file binutils bc perl
+
+          WORK="$GITHUB_WORKSPACE/work-busybox"
+          OUT="$GITHUB_WORKSPACE/busybox-output"
+          mkdir -p "$WORK/toolchain" "$OUT"
+
+          echo '== Reconstruct GCC 5.2 toolchain =='
+          ls -lh gcc-5.2.tar.gz.part_0*
+          cat gcc-5.2.tar.gz.part_00 \
+              gcc-5.2.tar.gz.part_01 \
+              gcc-5.2.tar.gz.part_02 \
+              gcc-5.2.tar.gz.part_03 \
+              gcc-5.2.tar.gz.part_04 > "$WORK/gcc-5.2.tar.gz"
+          gzip -t "$WORK/gcc-5.2.tar.gz"
+          tar -xzf "$WORK/gcc-5.2.tar.gz" -C "$WORK/toolchain"
+
+          TC="$WORK/toolchain/gcc-5.2"
+          TARGET="arm-openwrt-linux-uclibcgnueabi"
+          CROSS="$TC/bin/${TARGET}-"
+          export PATH="$TC/bin:$PATH"
+
+          echo '== Toolchain identity =='
+          file "${CROSS}gcc"
+          "${CROSS}gcc" --version
+          cat "$TC/info.mk"
+
+          echo '== Fetch official BusyBox 1.38.0 source =='
+          cd "$WORK"
+          curl -fL --retry 4 --retry-delay 2 \
+            -o busybox-1.38.0.tar.bz2 \
+            https://busybox.net/downloads/busybox-1.38.0.tar.bz2
+          echo '34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2  busybox-1.38.0.tar.bz2' | sha256sum -c -
+          tar -xjf busybox-1.38.0.tar.bz2
+          cd busybox-1.38.0
+
+          echo '== Configure BusyBox =='
+          make ARCH=arm CROSS_COMPILE="$CROSS" defconfig
+
+          # Build a self-contained static binary for easier deployment on embedded targets.
+          if grep -q '^# CONFIG_STATIC is not set' .config; then
+            sed -i 's/^# CONFIG_STATIC is not set$/CONFIG_STATIC=y/' .config
+          elif grep -q '^CONFIG_STATIC=' .config; then
+            sed -i 's/^CONFIG_STATIC=.*/CONFIG_STATIC=y/' .config
+          else
+            echo 'CONFIG_STATIC=y' >> .config
+          fi
+
+          # Keep the build non-interactive if 1.38.0 introduces new config symbols.
+          yes '' | make ARCH=arm CROSS_COMPILE="$CROSS" oldconfig
+
+          cp .config "$OUT/busybox-1.38.0.config"
+
+          echo '== Compile BusyBox =='
+          make -j2 ARCH=arm CROSS_COMPILE="$CROSS" V=1
+
+          cp busybox "$OUT/busybox-1.38.0-armv7-uclibc-static.unstripped"
+          "${CROSS}strip" --strip-unneeded busybox -o "$OUT/busybox-1.38.0-armv7-uclibc-static"
+
+          echo '== Verify binary =='
+          file "$OUT/busybox-1.38.0-armv7-uclibc-static"
+          "${CROSS}readelf" -h "$OUT/busybox-1.38.0-armv7-uclibc-static"
+          "${CROSS}readelf" -A "$OUT/busybox-1.38.0-armv7-uclibc-static" || true
+          "${CROSS}readelf" -d "$OUT/busybox-1.38.0-armv7-uclibc-static" || true
+          "${CROSS}readelf" -l "$OUT/busybox-1.38.0-armv7-uclibc-static" | grep -E 'interpreter|INTERP' || true
+
+          sha256sum \
+            "$OUT/busybox-1.38.0-armv7-uclibc-static" \
+            "$OUT/busybox-1.38.0-armv7-uclibc-static.unstripped" \
+            | tee "$OUT/SHA256SUMS"
+
+          {
+            echo 'BusyBox version: 1.38.0'
+            echo 'Source: https://busybox.net/downloads/busybox-1.38.0.tar.bz2'
+            echo 'Source SHA256: 34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2'
+            echo "Toolchain: ${TARGET}-gcc 5.2.0 / uClibc-ng 1.0.14"
+            echo 'Configuration: defconfig + CONFIG_STATIC=y'
+            echo
+            file "$OUT/busybox-1.38.0-armv7-uclibc-static"
+            echo
+            "${CROSS}readelf" -h "$OUT/busybox-1.38.0-armv7-uclibc-static"
+            echo
+            "${CROSS}readelf" -A "$OUT/busybox-1.38.0-armv7-uclibc-static" || true
+            echo
+            "${CROSS}readelf" -d "$OUT/busybox-1.38.0-armv7-uclibc-static" || true
+          } > "$OUT/build-info.txt"
+
+          echo '== Build completed successfully =='
+
+      - name: Collect build log
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/busybox-output"
+          cp "$GITHUB_WORKSPACE/busybox-build.log" "$GITHUB_WORKSPACE/busybox-output/busybox-build.log" 2>/dev/null || true
+
+      - name: Upload BusyBox build result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: busybox-1.38.0-arm-gcc5.2-uclibc
+          path: busybox-output/
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 6
+
+      - name: Mark job failed when cross build failed
+        if: steps.crossbuild.outcome != 'success'
+        run: exit 1
