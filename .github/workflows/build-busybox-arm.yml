@@ -27,7 +27,7 @@ jobs:
           exec > >(tee "$GITHUB_WORKSPACE/busybox-build.log") 2>&1
 
           sudo apt-get update
-          sudo apt-get install -y libc6-i386 lib32stdc++6 lib32gcc-s1 build-essential bzip2 curl file binutils bc perl
+          sudo apt-get install -y libc6-i386 lib32stdc++6 lib32gcc-s1 build-essential bzip2 curl file binutils bc perl python3
 
           WORK="$GITHUB_WORKSPACE/work-busybox"
           OUT="$GITHUB_WORKSPACE/busybox-output"
@@ -44,10 +44,11 @@ jobs:
           export PATH="$TC/bin:$PATH"
           export STAGING_DIR="$TC"
 
-          echo '== Toolchain identity =='
           file "${CROSS}gcc"
           "${CROSS}gcc" --version
           cat "$TC/info.mk"
+          test -f "$TC/lib/gcc/$TARGET/5.2.0/libgcc_eh.a"
+          "${CROSS}nm" "$TC/lib/gcc/$TARGET/5.2.0/libgcc_eh.a" | grep '__aeabi_unwind_cpp_pr' | head || true
 
           echo '== Fetch official BusyBox 1.38.0 source =='
           cd "$WORK"
@@ -56,23 +57,31 @@ jobs:
           tar -xjf busybox-1.38.0.tar.bz2
           cd busybox-1.38.0
 
+          echo '== Patch BusyBox linker probe for old OpenWrt uClibc toolchain =='
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/trylink')
+          s = p.read_text()
+          old = '$CC $CFLAGS $LDFLAGS $1 "$tempname".c -o "$tempname" >/dev/null 2>&1'
+          new = '$CC $CFLAGS $LDFLAGS $1 "$tempname".c -o "$tempname" -lgcc_eh >/dev/null 2>&1'
+          if old not in s:
+              raise SystemExit('expected trylink check_cc line not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+
           echo '== Configure BusyBox =='
           make ARCH=arm CROSS_COMPILE="$CROSS" defconfig
-          if grep -q '^# CONFIG_STATIC is not set' .config; then
-            sed -i 's/^# CONFIG_STATIC is not set$/CONFIG_STATIC=y/' .config
-          elif grep -q '^CONFIG_STATIC=' .config; then
-            sed -i 's/^CONFIG_STATIC=.*/CONFIG_STATIC=y/' .config
+          sed -i 's/^# CONFIG_STATIC is not set$/CONFIG_STATIC=y/' .config
+          sed -i 's/^CONFIG_STATIC=.*/CONFIG_STATIC=y/' .config
+          if grep -q '^CONFIG_EXTRA_LDLIBS=' .config; then
+            sed -i 's/^CONFIG_EXTRA_LDLIBS=.*/CONFIG_EXTRA_LDLIBS="gcc_eh"/' .config
           else
-            echo 'CONFIG_STATIC=y' >> .config
+            echo 'CONFIG_EXTRA_LDLIBS="gcc_eh"' >> .config
           fi
 
-          # BusyBox oldconfig exits normally after consuming the needed answers.
-          # Disable pipefail only around the yes|make pipeline so SIGPIPE from yes
-          # is not treated as a build failure; make remains the pipeline status.
           set +o pipefail
           yes '' | make ARCH=arm CROSS_COMPILE="$CROSS" oldconfig
           set -o pipefail
-
           cp .config "$OUT/busybox-1.38.0.config"
 
           echo '== Compile BusyBox =='
@@ -87,14 +96,14 @@ jobs:
           "${CROSS}readelf" -A "$OUT/busybox-1.38.0-armv7-uclibc-static" || true
           "${CROSS}readelf" -d "$OUT/busybox-1.38.0-armv7-uclibc-static" || true
           "${CROSS}readelf" -l "$OUT/busybox-1.38.0-armv7-uclibc-static" | grep -E 'interpreter|INTERP' || true
-
           sha256sum "$OUT/busybox-1.38.0-armv7-uclibc-static" "$OUT/busybox-1.38.0-armv7-uclibc-static.unstripped" | tee "$OUT/SHA256SUMS"
 
           {
             echo 'BusyBox version: 1.38.0'
             echo 'Source SHA256: 34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2'
             echo "Toolchain: ${TARGET}-gcc 5.2.0 / uClibc-ng 1.0.14"
-            echo 'Configuration: defconfig + CONFIG_STATIC=y'
+            echo 'Configuration: defconfig + CONFIG_STATIC=y + CONFIG_EXTRA_LDLIBS="gcc_eh"'
+            echo 'Compatibility patch: scripts/trylink check_cc appends -lgcc_eh'
             echo
             file "$OUT/busybox-1.38.0-armv7-uclibc-static"
             echo
