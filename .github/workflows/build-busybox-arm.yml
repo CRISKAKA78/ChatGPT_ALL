@@ -56,26 +56,22 @@ jobs:
           tar -xjf busybox-1.38.0.tar.bz2
           cd busybox-1.38.0
 
-          echo '== Compatibility patch: explicit_bzero for uClibc-ng 1.0.14 =='
+          echo '== Compatibility patch: explicit_bzero for old uClibc =='
           grep -n 'explicit_bzero' libbb/yescrypt/y.c || true
           python3 - <<'PY'
           from pathlib import Path
           p = Path('libbb/yescrypt/y.c')
           s = p.read_text()
           if 'explicit_bzero(' not in s:
-              raise SystemExit('expected explicit_bzero calls not found in yescrypt/y.c')
+              raise SystemExit('expected explicit_bzero calls not found')
           s = s.replace('explicit_bzero(', 'bb_explicit_bzero_compat(')
-          compat = '''\
-/* Compatibility for old libc without explicit_bzero().
- * Volatile byte stores prevent the compiler from eliminating the wipe. */
-static void bb_explicit_bzero_compat(void *buf, unsigned long len)
-{
-    volatile unsigned char *p = (volatile unsigned char *)buf;
-    while (len--)
-        *p++ = 0;
-}
-
-'''
+          compat = ('/* old-libc compatibility: secure memory wipe */\n'
+                    'static void bb_explicit_bzero_compat(void *buf, unsigned long len)\n'
+                    '{\n'
+                    '    volatile unsigned char *p = (volatile unsigned char *)buf;\n'
+                    '    while (len--)\n'
+                    '        *p++ = 0;\n'
+                    '}\n\n')
           p.write_text(compat + s)
           PY
           grep -n 'bb_explicit_bzero_compat' libbb/yescrypt/y.c | head -20
