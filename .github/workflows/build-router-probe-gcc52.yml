@@ -56,7 +56,10 @@ jobs:
           CROSS="$TC/bin/${TARGET}-"
           export PATH="$TC/bin:$PATH"
           export STAGING_DIR="$TC"
+          export LIBRARY_PATH="$TC/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+          export LDFLAGS="-L$TC/lib -Wl,-rpath-link,$TC/lib"
           "${CROSS}g++" --version
+          "${CROSS}g++" -print-search-dirs
           cat "$TC/info.mk"
 
           cat > "$WORK/router-toolchain.cmake" <<EOF
@@ -64,6 +67,7 @@ jobs:
           set(CMAKE_SYSTEM_PROCESSOR arm)
           set(CMAKE_C_COMPILER "${CROSS}gcc")
           set(CMAKE_CXX_COMPILER "${CROSS}g++")
+          set(CMAKE_EXE_LINKER_FLAGS_INIT "-L$TC/lib -Wl,-rpath-link,$TC/lib")
           set(CMAKE_FIND_ROOT_PATH "$TC")
           set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
           set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
@@ -82,28 +86,28 @@ jobs:
 
           BIN="$WORK/build/router-probe"
           test -f "$BIN"
-          cp "$BIN" "$OUT/router-probe-armv7-gcc5.2-uclibc.unstripped"
-          "${CROSS}strip" --strip-unneeded "$BIN" -o "$OUT/router-probe-armv7-gcc5.2-uclibc"
-          chmod +x "$OUT/router-probe-armv7-gcc5.2-uclibc"
+          cp "$BIN" "$OUT/router-probe-arm-gcc5.2-uclibc.unstripped"
+          "${CROSS}strip" --strip-unneeded "$BIN" -o "$OUT/router-probe-arm-gcc5.2-uclibc"
+          chmod +x "$OUT/router-probe-arm-gcc5.2-uclibc"
 
           echo '== Verify =='
-          file "$OUT/router-probe-armv7-gcc5.2-uclibc"
-          "${CROSS}readelf" -h "$OUT/router-probe-armv7-gcc5.2-uclibc"
-          "${CROSS}readelf" -A "$OUT/router-probe-armv7-gcc5.2-uclibc" || true
-          "${CROSS}readelf" -l "$OUT/router-probe-armv7-gcc5.2-uclibc" | grep -E 'INTERP|interpreter' || true
-          "${CROSS}readelf" -d "$OUT/router-probe-armv7-gcc5.2-uclibc" || true
-          sha256sum "$OUT/router-probe-armv7-gcc5.2-uclibc" "$OUT/router-probe-armv7-gcc5.2-uclibc.unstripped" | tee "$OUT/SHA256SUMS"
+          file "$OUT/router-probe-arm-gcc5.2-uclibc"
+          "${CROSS}readelf" -h "$OUT/router-probe-arm-gcc5.2-uclibc"
+          "${CROSS}readelf" -A "$OUT/router-probe-arm-gcc5.2-uclibc" || true
+          "${CROSS}readelf" -l "$OUT/router-probe-arm-gcc5.2-uclibc" | grep -E 'INTERP|interpreter' || true
+          "${CROSS}readelf" -d "$OUT/router-probe-arm-gcc5.2-uclibc" || true
+          sha256sum "$OUT/router-probe-arm-gcc5.2-uclibc" "$OUT/router-probe-arm-gcc5.2-uclibc.unstripped" | tee "$OUT/SHA256SUMS"
 
           {
             echo 'Source archive SHA256: a32a7925f830572bef1892160c6f191321e4c67a3fad5ce95497766c1af4e0ef'
             echo 'Toolchain: arm-openwrt-linux-uclibcgnueabi GCC 5.2.0 / uClibc-ng 1.0.14'
             echo 'CMake: Release, BUILD_TESTING=OFF'
             echo
-            file "$OUT/router-probe-armv7-gcc5.2-uclibc"
+            file "$OUT/router-probe-arm-gcc5.2-uclibc"
             echo
-            "${CROSS}readelf" -A "$OUT/router-probe-armv7-gcc5.2-uclibc" || true
+            "${CROSS}readelf" -A "$OUT/router-probe-arm-gcc5.2-uclibc" || true
             echo
-            "${CROSS}readelf" -d "$OUT/router-probe-armv7-gcc5.2-uclibc" || true
+            "${CROSS}readelf" -d "$OUT/router-probe-arm-gcc5.2-uclibc" || true
           } > "$OUT/build-info.txt"
 
       - name: Collect log
@@ -116,7 +120,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: router-probe-armv7-gcc5.2-uclibc
+          name: router-probe-arm-gcc5.2-uclibc
           path: router-probe-output/
           retention-days: 3
 
