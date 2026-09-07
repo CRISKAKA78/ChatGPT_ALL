@@ -67,8 +67,13 @@ jobs:
             sed -i '1i #include "rmp/gcc52_compat.h"' "$WORK/src/probe/src/$f"
             sed -i 's/std::to_string/Gcc52ToString/g' "$WORK/src/probe/src/$f"
           done
-          if grep -R -n 'std::to_string' "$WORK/src/probe/src"; then
-            echo 'ERROR: unpatched std::to_string remains'
+          sed -i \
+            -e 's/std::strtoull/::strtoull/g' \
+            -e 's/std::strtoul/::strtoul/g' \
+            -e 's/std::strtol/::strtol/g' \
+            "$WORK/src/probe/src/"*.cpp
+          if grep -R -n -E 'std::to_string|std::strtoull|std::strtoul|std::strtol' "$WORK/src/probe/src"; then
+            echo 'ERROR: unpatched GCC 5.2/uClibc compatibility API remains'
             exit 1
           fi
 
@@ -127,7 +132,7 @@ jobs:
             echo 'Source archive SHA256: a32a7925f830572bef1892160c6f191321e4c67a3fad5ce95497766c1af4e0ef'
             echo 'Toolchain: arm-openwrt-linux-uclibcgnueabi GCC 5.2.0 / uClibc-ng 1.0.14'
             echo 'CMake: Release, BUILD_TESTING=OFF'
-            echo 'Compatibility: std::to_string replaced at build time with ostringstream-based Gcc52ToString; original probe.zip unchanged.'
+            echo 'Compatibility: build-time shim for missing std::to_string and std::strto* namespace exports; original probe.zip unchanged.'
             echo
             file "$OUT/router-probe-arm-gcc5.2-uclibc"
             echo
