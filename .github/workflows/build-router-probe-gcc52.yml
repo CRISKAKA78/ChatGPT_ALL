@@ -51,6 +51,7 @@ jobs:
           cat > "$WORK/src/probe/include/rmp/gcc52_compat.h" <<'EOF'
           #ifndef RMP_GCC52_COMPAT_H
           #define RMP_GCC52_COMPAT_H
+          #include <stdio.h>
           #include <sstream>
           #include <string>
           namespace rmp {
@@ -132,7 +133,7 @@ jobs:
             echo 'Source archive SHA256: a32a7925f830572bef1892160c6f191321e4c67a3fad5ce95497766c1af4e0ef'
             echo 'Toolchain: arm-openwrt-linux-uclibcgnueabi GCC 5.2.0 / uClibc-ng 1.0.14'
             echo 'CMake: Release, BUILD_TESTING=OFF'
-            echo 'Compatibility: build-time shim for missing std::to_string and std::strto* namespace exports; original probe.zip unchanged.'
+            echo 'Compatibility: build-time shim for missing std::to_string/std::strto* exports and explicit stdio declarations; original probe.zip unchanged.'
             echo
             file "$OUT/router-probe-arm-gcc5.2-uclibc"
             echo
