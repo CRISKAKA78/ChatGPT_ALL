@@ -4,7 +4,7 @@ on:
   push:
     branches: [probe-build-temp-fix]
     paths:
-      - 'probe-build-input/**'
+      - 'probe-build-input-v2/**'
       - '.github/workflows/build-router-probe-gcc52.yml'
   workflow_dispatch:
 
@@ -18,13 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build router-probe
-        id: crossbuild
-        continue-on-error: true
+      - name: Build production router-probe only
         shell: bash
         run: |
           set -Eeuo pipefail
-          exec > >(tee "$GITHUB_WORKSPACE/router-probe-build.log") 2>&1
           sudo apt-get update
           sudo apt-get install -y libc6-i386 lib32stdc++6 lib32gcc-s1 cmake unzip file binutils
 
@@ -32,7 +29,7 @@ jobs:
           OUT="$GITHUB_WORKSPACE/router-probe-output"
           mkdir -p "$WORK/toolchain" "$OUT"
 
-          echo '== Reconstruct and verify uploaded source =='
+          echo '== Reconstruct verified previous source baseline =='
           cat \
             probe-build-input/probe.zip.b64.part_00 \
             probe-build-input/probe.zip.b64.part_01 \
@@ -41,11 +38,21 @@ jobs:
             probe-build-input/probe.zip.b64.fix_02 \
             probe-build-input/probe.zip.b64.part_03 \
             probe-build-input/probe.zip.b64.part_04 \
-            | base64 -d > "$WORK/probe.zip"
-          echo 'a32a7925f830572bef1892160c6f191321e4c67a3fad5ce95497766c1af4e0ef  '"$WORK/probe.zip" | sha256sum -c -
-          test "$(stat -c %s "$WORK/probe.zip")" = '50766'
-          unzip -t "$WORK/probe.zip"
-          unzip -q "$WORK/probe.zip" -d "$WORK/src"
+            | base64 -d > "$WORK/probe-base.zip"
+          echo 'a32a7925f830572bef1892160c6f191321e4c67a3fad5ce95497766c1af4e0ef  '"$WORK/probe-base.zip" | sha256sum -c -
+          unzip -q "$WORK/probe-base.zip" -d "$WORK/src"
+
+          echo '== Overlay updated production sources =='
+          cat \
+            probe-build-input-v2/prod-update.b64.part_00 \
+            probe-build-input-v2/prod-update.b64.part_01 \
+            probe-build-input-v2/prod-update.b64.part_02 \
+            | base64 -d > "$WORK/prod-update.tar.gz"
+          echo '51540b657568ce05bef1e1af200666a77828a4263f75e6b5800b527df39dfa99  '"$WORK/prod-update.tar.gz" | sha256sum -c -
+          tar -xzf "$WORK/prod-update.tar.gz" -C "$WORK/src"
+
+          # Tests are intentionally excluded from this build.
+          rm -rf "$WORK/src/probe/tests"
 
           echo '== Apply GCC 5.2/uClibc compatibility shim =='
           cat > "$WORK/src/probe/include/rmp/gcc52_compat.h" <<'EOF'
@@ -64,6 +71,7 @@ jobs:
           }
           #endif
           EOF
+
           for f in client.cpp file_manager.cpp file_wire.cpp; do
             sed -i '1i #include "rmp/gcc52_compat.h"' "$WORK/src/probe/src/$f"
             sed -i 's/std::to_string/Gcc52ToString/g' "$WORK/src/probe/src/$f"
@@ -73,6 +81,7 @@ jobs:
             -e 's/std::strtoul/::strtoul/g' \
             -e 's/std::strtol/::strtol/g' \
             "$WORK/src/probe/src/"*.cpp
+
           if grep -R -n -E 'std::to_string|std::strtoull|std::strtoul|std::strtol' "$WORK/src/probe/src"; then
             echo 'ERROR: unpatched GCC 5.2/uClibc compatibility API remains'
             exit 1
@@ -90,8 +99,6 @@ jobs:
           export LIBRARY_PATH="$TC/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
           export LDFLAGS="-L$TC/lib -Wl,-rpath-link,$TC/lib"
           "${CROSS}g++" --version
-          "${CROSS}g++" -print-search-dirs
-          cat "$TC/info.mk"
 
           cat > "$WORK/router-toolchain.cmake" <<EOF
           set(CMAKE_SYSTEM_NAME Linux)
@@ -106,56 +113,32 @@ jobs:
           set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
           EOF
 
-          echo '== Configure =='
+          echo '== Configure production build (tests OFF) =='
           cmake -S "$WORK/src/probe" -B "$WORK/build" \
             -DCMAKE_TOOLCHAIN_FILE="$WORK/router-toolchain.cmake" \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTING=OFF
 
-          echo '== Compile =='
-          cmake --build "$WORK/build" --parallel 2 --verbose
+          echo '== Build router-probe target only =='
+          cmake --build "$WORK/build" --target router-probe --parallel 2 --verbose
 
           BIN="$WORK/build/router-probe"
           test -f "$BIN"
-          cp "$BIN" "$OUT/router-probe-arm-gcc5.2-uclibc.unstripped"
           "${CROSS}strip" --strip-unneeded "$BIN" -o "$OUT/router-probe-arm-gcc5.2-uclibc"
           chmod +x "$OUT/router-probe-arm-gcc5.2-uclibc"
 
-          echo '== Verify =='
+          echo '== Verify final binary =='
           file "$OUT/router-probe-arm-gcc5.2-uclibc"
           "${CROSS}readelf" -h "$OUT/router-probe-arm-gcc5.2-uclibc"
           "${CROSS}readelf" -A "$OUT/router-probe-arm-gcc5.2-uclibc" || true
           "${CROSS}readelf" -l "$OUT/router-probe-arm-gcc5.2-uclibc" | grep -E 'INTERP|interpreter' || true
           "${CROSS}readelf" -d "$OUT/router-probe-arm-gcc5.2-uclibc" || true
-          sha256sum "$OUT/router-probe-arm-gcc5.2-uclibc" "$OUT/router-probe-arm-gcc5.2-uclibc.unstripped" | tee "$OUT/SHA256SUMS"
+          sha256sum "$OUT/router-probe-arm-gcc5.2-uclibc"
 
-          {
-            echo 'Source archive SHA256: a32a7925f830572bef1892160c6f191321e4c67a3fad5ce95497766c1af4e0ef'
-            echo 'Toolchain: arm-openwrt-linux-uclibcgnueabi GCC 5.2.0 / uClibc-ng 1.0.14'
-            echo 'CMake: Release, BUILD_TESTING=OFF'
-            echo 'Compatibility: build-time shim for missing std::to_string/std::strto* exports and explicit stdio declarations; original probe.zip unchanged.'
-            echo
-            file "$OUT/router-probe-arm-gcc5.2-uclibc"
-            echo
-            "${CROSS}readelf" -A "$OUT/router-probe-arm-gcc5.2-uclibc" || true
-            echo
-            "${CROSS}readelf" -d "$OUT/router-probe-arm-gcc5.2-uclibc" || true
-          } > "$OUT/build-info.txt"
-
-      - name: Collect log
-        if: always()
-        run: |
-          mkdir -p router-probe-output
-          cp router-probe-build.log router-probe-output/ 2>/dev/null || true
-
-      - name: Upload result
-        if: always()
+      - name: Upload production binary only
         uses: actions/upload-artifact@v4
         with:
           name: router-probe-arm-gcc5.2-uclibc
-          path: router-probe-output/
+          path: router-probe-output/router-probe-arm-gcc5.2-uclibc
+          if-no-files-found: error
           retention-days: 3
-
-      - name: Mark failed
-        if: steps.crossbuild.outcome != 'success'
-        run: exit 1
