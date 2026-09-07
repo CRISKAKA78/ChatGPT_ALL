@@ -2,7 +2,7 @@ name: Build router-probe GCC 5.2
 
 on:
   push:
-    branches: [probe-build-temp]
+    branches: [probe-build-temp-fix]
     paths:
       - 'probe-build-input/**'
       - '.github/workflows/build-router-probe-gcc52.yml'
@@ -33,7 +33,15 @@ jobs:
           mkdir -p "$WORK/toolchain" "$OUT"
 
           echo '== Reconstruct and verify uploaded source =='
-          cat probe-build-input/probe.zip.b64.part_* | base64 -d > "$WORK/probe.zip"
+          cat \
+            probe-build-input/probe.zip.b64.part_00 \
+            probe-build-input/probe.zip.b64.part_01 \
+            probe-build-input/probe.zip.b64.fix_00 \
+            probe-build-input/probe.zip.b64.fix_01 \
+            probe-build-input/probe.zip.b64.fix_02 \
+            probe-build-input/probe.zip.b64.part_03 \
+            probe-build-input/probe.zip.b64.part_04 \
+            | base64 -d > "$WORK/probe.zip"
           echo 'a32a7925f830572bef1892160c6f191321e4c67a3fad5ce95497766c1af4e0ef  '"$WORK/probe.zip" | sha256sum -c -
           test "$(stat -c %s "$WORK/probe.zip")" = '50766'
           unzip -t "$WORK/probe.zip"
