@@ -47,6 +47,31 @@ jobs:
           unzip -t "$WORK/probe.zip"
           unzip -q "$WORK/probe.zip" -d "$WORK/src"
 
+          echo '== Apply GCC 5.2/uClibc compatibility shim =='
+          cat > "$WORK/src/probe/include/rmp/gcc52_compat.h" <<'EOF'
+          #ifndef RMP_GCC52_COMPAT_H
+          #define RMP_GCC52_COMPAT_H
+          #include <sstream>
+          #include <string>
+          namespace rmp {
+          template <typename T>
+          std::string Gcc52ToString(const T& value) {
+              std::ostringstream stream;
+              stream << value;
+              return stream.str();
+          }
+          }
+          #endif
+          EOF
+          for f in client.cpp file_manager.cpp file_wire.cpp; do
+            sed -i '1i #include "rmp/gcc52_compat.h"' "$WORK/src/probe/src/$f"
+            sed -i 's/std::to_string/Gcc52ToString/g' "$WORK/src/probe/src/$f"
+          done
+          if grep -R -n 'std::to_string' "$WORK/src/probe/src"; then
+            echo 'ERROR: unpatched std::to_string remains'
+            exit 1
+          fi
+
           echo '== Reconstruct GCC 5.2 toolchain =='
           cat gcc-5.2.tar.gz.part_00 gcc-5.2.tar.gz.part_01 gcc-5.2.tar.gz.part_02 gcc-5.2.tar.gz.part_03 gcc-5.2.tar.gz.part_04 > "$WORK/gcc-5.2.tar.gz"
           gzip -t "$WORK/gcc-5.2.tar.gz"
@@ -102,6 +127,7 @@ jobs:
             echo 'Source archive SHA256: a32a7925f830572bef1892160c6f191321e4c67a3fad5ce95497766c1af4e0ef'
             echo 'Toolchain: arm-openwrt-linux-uclibcgnueabi GCC 5.2.0 / uClibc-ng 1.0.14'
             echo 'CMake: Release, BUILD_TESTING=OFF'
+            echo 'Compatibility: std::to_string replaced at build time with ostringstream-based Gcc52ToString; original probe.zip unchanged.'
             echo
             file "$OUT/router-probe-arm-gcc5.2-uclibc"
             echo
