@@ -2,9 +2,9 @@ name: Build router-probe GCC 5.2
 
 on:
   push:
-    branches: [probe-build-temp-fix]
+    branches: [probe-build-v3]
     paths:
-      - 'probe-build-input-v2/**'
+      - 'probe-build-input-v3/**'
       - '.github/workflows/build-router-probe-gcc52.yml'
   workflow_dispatch:
 
@@ -29,7 +29,7 @@ jobs:
           OUT="$GITHUB_WORKSPACE/router-probe-output"
           mkdir -p "$WORK/toolchain" "$OUT"
 
-          echo '== Reconstruct verified previous source baseline =='
+          echo '== Reconstruct verified original source baseline =='
           cat \
             probe-build-input/probe.zip.b64.part_00 \
             probe-build-input/probe.zip.b64.part_01 \
@@ -42,14 +42,23 @@ jobs:
           echo 'a32a7925f830572bef1892160c6f191321e4c67a3fad5ce95497766c1af4e0ef  '"$WORK/probe-base.zip" | sha256sum -c -
           unzip -q "$WORK/probe-base.zip" -d "$WORK/src"
 
-          echo '== Overlay updated production sources =='
+          echo '== Overlay previous production update =='
           cat \
             probe-build-input-v2/prod-update.b64.part_00 \
             probe-build-input-v2/prod-update.b64.part_01 \
             probe-build-input-v2/prod-update.b64.part_02 \
-            | base64 -d > "$WORK/prod-update.tar.gz"
-          echo '51540b657568ce05bef1e1af200666a77828a4263f75e6b5800b527df39dfa99  '"$WORK/prod-update.tar.gz" | sha256sum -c -
-          tar -xzf "$WORK/prod-update.tar.gz" -C "$WORK/src"
+            | base64 -d > "$WORK/prod-update-v2.tar.gz"
+          echo '51540b657568ce05bef1e1af200666a77828a4263f75e6b5800b527df39dfa99  '"$WORK/prod-update-v2.tar.gz" | sha256sum -c -
+          tar -xzf "$WORK/prod-update-v2.tar.gz" -C "$WORK/src"
+
+          echo '== Overlay latest production update =='
+          cat \
+            probe-build-input-v3/prod-update.bin.part_00 \
+            probe-build-input-v3/prod-update.bin.part_01 \
+            probe-build-input-v3/prod-update.bin.part_02 \
+            > "$WORK/prod-update-v3.tar.gz"
+          echo 'a9986a1b0843db8ca73d53236e2dc84f301e8456a03a84b714fd93b890d6dc7c  '"$WORK/prod-update-v3.tar.gz" | sha256sum -c -
+          tar -xzf "$WORK/prod-update-v3.tar.gz" -C "$WORK/src"
 
           # Tests are intentionally excluded from this build.
           rm -rf "$WORK/src/probe/tests"
@@ -73,8 +82,10 @@ jobs:
           EOF
 
           for f in client.cpp file_manager.cpp file_wire.cpp; do
-            sed -i '1i #include "rmp/gcc52_compat.h"' "$WORK/src/probe/src/$f"
-            sed -i 's/std::to_string/Gcc52ToString/g' "$WORK/src/probe/src/$f"
+            if grep -q 'std::to_string' "$WORK/src/probe/src/$f"; then
+              sed -i '1i #include "rmp/gcc52_compat.h"' "$WORK/src/probe/src/$f"
+              sed -i 's/std::to_string/Gcc52ToString/g' "$WORK/src/probe/src/$f"
+            fi
           done
           sed -i \
             -e 's/std::strtoull/::strtoull/g' \
